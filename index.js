@@ -1,13 +1,10 @@
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
-require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
-
-dotenv.config();
+require("dotenv").config();
+const { MongoClient, ServerApiVersion } = require("mongodb");
 
 const app = express();
-const port = process.env.PORT || 6000;
+const port = process.env.PORT || 4000;
 
 // Middleware
 app.use(express.json());
@@ -15,43 +12,57 @@ app.use(cors());
 
 const uri = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.efqwe.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-    // Ensures that the client will close when you finish/error
-    await client.close();
+    console.log("Connected to MongoDB!");
+
+    const usersCollection = client.db("taskManagement").collection("users");
+
+    // ✅ User-related API
+    app.post("/users", async (req, res) => {
+      try {
+        const newUser = req.body;
+        const result = await usersCollection.insertOne(newUser);
+        res.status(201).json(result);
+      } catch (error) {
+        console.error("Error inserting user:", error);
+        res.status(500).json({ error: "Failed to insert user" });
+      }
+    });
+
+    // ✅ Get all users
+    app.get("/users", async (req, res) => {
+      try {
+        const users = await usersCollection.find().toArray();
+        res.json(users);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        res.status(500).json({ error: "Failed to fetch users" });
+      }
+    });
+
+  } catch (err) {
+    console.error("Error connecting to MongoDB:", err);
   }
 }
-run().catch(console.dir);
 
+run().catch(console.error);
 
-
-
-// Root Route
+// ✅ Root Route
 app.get("/", (req, res) => {
-    res.send("Server is connected and running!");
-  });
-  
-  // Start Server
-  app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-  });
+  res.send("Server is connected and running!");
+});
 
-
-
-
-
+// ✅ Start Server
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
