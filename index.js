@@ -1,16 +1,27 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
 const port = process.env.PORT || 4000;
+
+// Create HTTP server and Socket.io instance
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  },
+});
 
 // Middleware
 app.use(express.json());
 app.use(cors());
 
-const uri = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.efqwe.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+const uri = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.efqwe.mongodb.net/taskManagement?retryWrites=true&w=majority`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -23,35 +34,78 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     await client.connect();
-    console.log("Connected to MongoDB!");
+    console.log("✅ Connected to MongoDB!");
 
-    const usersCollection = client.db("taskManagement").collection("users");
+    const db = client.db("taskManagement");
+    const tasksCollection = db.collection("tasks");
 
-    // ✅ User-related API
-    app.post("/users", async (req, res) => {
+    // WebSocket Connection
+    io.on("connection", (socket) => {
+      console.log("🔗 A user connected");
+
+      socket.on("disconnect", () => {
+        console.log("❌ A user disconnected");
+      });
+    });
+
+    // MongoDB Change Stream to listen for real-time updates
+    const changeStream = tasksCollection.watch();
+    changeStream.on("change", (change) => {
+      io.emit("taskUpdate", change);
+    });
+
+    // ✅ Create Task
+    app.post("/tasks", async (req, res) => {
       try {
-        const newUser = req.body;
-        const result = await usersCollection.insertOne(newUser);
+        const newTask = req.body;
+        const result = await tasksCollection.insertOne(newTask);
         res.status(201).json(result);
+        io.emit("taskCreated", newTask);
       } catch (error) {
-        console.error("Error inserting user:", error);
-        res.status(500).json({ error: "Failed to insert user" });
+        res.status(500).json({ error: "Failed to create task" });
       }
     });
 
-    // ✅ Get all users
-    app.get("/users", async (req, res) => {
+    // ✅ Get All Tasks
+    app.get("/tasks", async (req, res) => {
       try {
-        const users = await usersCollection.find().toArray();
-        res.json(users);
+        const tasks = await tasksCollection.find().toArray();
+        res.json(tasks);
       } catch (error) {
-        console.error("Error fetching users:", error);
-        res.status(500).json({ error: "Failed to fetch users" });
+        res.status(500).json({ error: "Failed to fetch tasks" });
+      }
+    });
+
+    // ✅ Update Task Status
+    app.put("/tasks/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedData = req.body;
+        const result = await tasksCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+        res.json(result);
+        io.emit("taskUpdated", { id, ...updatedData });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to update task" });
+      }
+    });
+
+    // ✅ Delete Task
+    app.delete("/tasks/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await tasksCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json(result);
+        io.emit("taskDeleted", { id });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete task" });
       }
     });
 
   } catch (err) {
-    console.error("Error connecting to MongoDB:", err);
+    console.error("❌ Error connecting to MongoDB:", err);
   }
 }
 
@@ -59,10 +113,10 @@ run().catch(console.error);
 
 // ✅ Root Route
 app.get("/", (req, res) => {
-  res.send("Server is connected and running!");
+  res.send("🚀 Real-time Task Management Server is running!");
 });
 
 // ✅ Start Server
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+server.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
 });
